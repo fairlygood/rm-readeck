@@ -1,0 +1,13 @@
+<RCC>
+    <qresource prefix="/">
+        <file>ui/main.qml</file>
+        <file>ui/ArticleView.qml</file>
+        <file>ui/ImageGridView.qml</file>
+        <file>ui/ImageViewer.qml</file>
+        <file>ui/logo.svg</file>
+        <file>fonts/Bookerly-Bold.ttf</file>
+        <file>fonts/Bookerly-BoldItalic.ttf</file>
+        <file>fonts/Bookerly-Regular.ttf</file>
+        <file>fonts/Bookerly-RegularItalic.ttf</file>
+    </qresource>
+</RCC>

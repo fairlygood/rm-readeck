@@ -1,0 +1,834 @@
+This file is a merged representation of a subset of the codebase, containing files not matching ignore patterns, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of a subset of the repository's contents that is considered the most important context.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching these patterns are excluded: **/*.log, tmp/, venv, __pycache_, app/static, media/, static/
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+appload_comms.py
+entry.spec
+main.py
+readeck_client.py
+requirements.txt
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="appload_comms.py">
+import socket
+import json
+import struct
+import threading
+import time
+import logging
+import os
+
+logger = logging.getLogger(__name__)
+
+# System message types
+MSG_SYSTEM_TERMINATE = 0xFFFFFFFF
+MSG_SYSTEM_NEW_COORDINATOR = 0xFFFFFFFE  
+MSG_SYSTEM_UNKNOWN = 0xFFFFFFFD
+
+MAX_PACKAGE_SIZE = 10485760
+
+class AppLoadComms:
+    def __init__(self, socket_path, message_handler):
+        self.socket_path = socket_path
+        self.message_handler = message_handler
+        self.sock = None
+        self.running = False
+        self.connected = False
+
+        logger.info(f"AppLoadComms initialized with socket: {socket_path}")
+        print(f"AppLoadComms initialized with socket: {socket_path}")
+
+    def connect_to_appload(self):
+        """Connect to AppLoad's coordinator socket with continuous retry"""
+        logger.info("Starting connection thread")
+        print("Starting connection attempts...")
+
+        attempt = 0
+        while self.running and not self.connected:
+            attempt += 1
+            try:
+                if attempt % 10 == 1:
+                    logger.info(f"Connection attempt {attempt}")
+                    print(f"Connection attempt {attempt}")
+
+                if not os.path.exists(self.socket_path):
+                    time.sleep(0.1)
+                    continue
+
+                logger.info(f"Attempting SEQPACKET connection to {self.socket_path}")
+                print(f"Trying SEQPACKET connection to {self.socket_path}")
+
+                self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+                self.sock.settimeout(5.0)
+                self.sock.connect(self.socket_path)
+
+                print("Connected to AppLoad coordinator!")
+                logger.info("Connected to AppLoad coordinator!")
+                self.connected = True
+                return True
+
+            except Exception as e:
+                logger.error(f"Connection failed: {e}")
+                print(f"Connection failed: {e}")
+                if self.sock:
+                    self.sock.close()
+                    self.sock = None
+                time.sleep(0.2)
+
+        return False
+
+    def send_message(self, msg_type, contents):
+        """Send a message to the frontend"""
+        logger.info(f"Sending message type {msg_type}")
+        print(f"Sending message type {msg_type}")
+
+        if not self.sock or not self.connected:
+            logger.error("No socket available for sending message")
+            print("No socket available for sending message")
+            return
+
+        try:
+            contents_bytes = contents.encode('utf-8')
+            header = struct.pack('<II', msg_type, len(contents_bytes))
+
+            # Send header first
+            header_sent = self.sock.send(header)
+            logger.debug(f"Sent header: {header_sent} bytes")
+            print(f"Sent header: {header_sent} bytes")
+
+            # Send content second
+            if len(contents_bytes) > 0:
+                content_sent = self.sock.send(contents_bytes)
+                logger.debug(f"Sent content: {content_sent} bytes")
+                print(f"Sent content: {content_sent} bytes")
+
+            logger.info(f"Successfully sent message type {msg_type}")
+            print(f"Successfully sent message type {msg_type}")
+
+        except Exception as e:
+            logger.error(f"Error sending message: {e}")
+            print(f"Error sending message: {e}")
+            self.connected = False
+
+    def receive_message(self):
+        """Receive a message from AppLoad"""
+        if not self.sock or not self.connected:
+            return None, None
+
+        try:
+            self.sock.settimeout(1.0)
+
+            logger.debug("Waiting for message header...")
+            print("Waiting for message header...")
+
+            header_data = self.sock.recv(8)
+            logger.debug(f"Received header: {len(header_data)} bytes")
+            print(f"Received header: {len(header_data)} bytes")
+
+            if len(header_data) < 8:
+                logger.warning(f"Received incomplete header: {len(header_data)} bytes")
+                if len(header_data) == 0:
+                    logger.info("Connection closed by peer")
+                    print("Connection closed by peer")
+                    self.connected = False
+                return None, None
+
+            msg_type, length = struct.unpack('<II', header_data)
+            logger.debug(f"Header - type: {msg_type}, length: {length}")
+            print(f"Header - type: {msg_type}, length: {length}")
+
+            if length > MAX_PACKAGE_SIZE:
+                logger.error(f"Message too large: {length} bytes")
+                print(f"Message too large: {length} bytes")
+                return None, None
+
+            if length > 0:
+                logger.debug(f"Waiting for content ({length} bytes)...")
+                print(f"Waiting for content ({length} bytes)...")
+
+                content_data = self.sock.recv(length)
+                logger.debug(f"Received content: {len(content_data)} bytes")
+                print(f"Received content: {len(content_data)} bytes")
+
+                if len(content_data) < length:
+                    logger.warning(f"Content shorter than expected: got {len(content_data)}, expected {length}")
+                    return None, None
+
+                decoded_contents = content_data.decode('utf-8')
+                logger.info(f"Received message type {msg_type}: {decoded_contents}")
+                print(f"Decoded contents: '{decoded_contents}'")
+                return msg_type, decoded_contents
+            else:
+                logger.info(f"Received message type {msg_type}: (no content)")
+                print("No content in message")
+                return msg_type, ""
+
+        except socket.timeout:
+            logger.debug("Socket timeout - no message received")
+            return None, None
+        except Exception as e:
+            logger.error(f"Error receiving message: {e}")
+            print(f"Error receiving message: {e}")
+            self.connected = False
+            return None, None
+
+    def handle_system_message(self, msg_type, contents):
+        """Handle system messages from AppLoad"""
+        if msg_type == MSG_SYSTEM_NEW_COORDINATOR:
+            logger.info("Frontend coordinator message received")
+            print("Frontend coordinator message received")
+
+        elif msg_type == MSG_SYSTEM_TERMINATE:
+            logger.info("Frontend terminating")
+            print("Frontend terminating")
+            self.running = False
+
+        elif msg_type == MSG_SYSTEM_UNKNOWN:
+            logger.info("System message (unknown type)")
+            print("System message (unknown type)")
+
+    def run(self):
+        """Main message loop"""
+        self.running = True
+        logger.info("AppLoad communications started")
+        print("AppLoad communications started...")
+
+        # Start connection thread
+        connection_thread = threading.Thread(target=self.connect_to_appload)
+        connection_thread.daemon = True
+        connection_thread.start()
+
+        logger.info("Waiting for messages...")
+        print("Waiting for messages...")
+
+        message_count = 0
+        while self.running:
+            if self.connected:
+                msg_type, contents = self.receive_message()
+                if msg_type is not None:
+                    message_count += 1
+                    logger.info(f"Processing message #{message_count}")
+                    print(f"Processing message #{message_count}")
+
+                    # Handle system messages internally
+                    if msg_type in [MSG_SYSTEM_TERMINATE, MSG_SYSTEM_NEW_COORDINATOR, MSG_SYSTEM_UNKNOWN]:
+                        self.handle_system_message(msg_type, contents)
+                    else:
+                        # Pass application messages to handler
+                        self.message_handler(msg_type, contents)
+            else:
+                time.sleep(0.1)
+
+        logger.info("AppLoad communications shutting down")
+        print("AppLoad communications shutting down")
+        if self.sock:
+            self.sock.close()
+</file>
+
+<file path="entry.spec">
+# -*- mode: python ; coding: utf-8 -*-
+
+
+a = Analysis(
+    ['main.py'],
+    pathex=[],
+    binaries=[],
+    datas=[],
+    hiddenimports=[],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    noarchive=False,
+    optimize=0,
+)
+pyz = PYZ(a.pure)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name='entry',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=True,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='entry',
+)
+</file>
+
+<file path="main.py">
+#!/usr/bin/env python3
+import sys
+import json
+import logging
+import argparse
+import requests
+import os
+from appload_comms import AppLoadComms
+from readeck_client import ReadeckClient
+
+# Set up logging
+logging.basicConfig(
+    filename='/tmp/readeck-backend.log',
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
+logger = logging.getLogger(__name__)
+
+# Message types
+ARTICLES_REQUEST = 1
+ARTICLES_RESPONSE = 101
+MARK_READ_REQUEST = 2
+MARK_READ_RESPONSE = 102
+GET_ARTICLE_CONTENT = 3
+ARTICLE_CONTENT_RESPONSE = 103
+
+
+class ReadeckApp:
+    def __init__(self, socket_path):  # Remove readeck_url and api_key parameters
+        self.readeck_client = ReadeckClient()  # No parameters needed now
+        self.appload = AppLoadComms(socket_path, self.handle_message)
+
+        logger.info(f"ReadeckApp initialized")
+        print(f"ReadeckApp initialized")
+
+    def handle_message(self, msg_type, contents):
+        """Handle messages from the QML frontend"""
+        logger.info(f"Handling message type {msg_type}: {contents}")
+        print(f"HANDLING: Message type {msg_type}: '{contents}'")
+
+        if msg_type == ARTICLES_REQUEST:
+            logger.info("Frontend requested articles - fetching from Readeck")
+            print("Frontend requested articles - fetching from Readeck")
+            self.send_unread_articles()
+
+        elif msg_type == MARK_READ_REQUEST:
+            logger.info(f"Frontend wants to mark article as read: {contents}")
+            print(f"Frontend wants to mark article as read: {contents}")
+            self.mark_article_read(contents)
+        
+        elif msg_type == GET_ARTICLE_CONTENT:
+            article_id = contents.strip()
+            logger.info(f"Fetching content for article: {article_id}")
+            print(f"Fetching content for article: {article_id}")
+
+            article = self.readeck_client.fetch_article_content(article_id)
+            if article:
+                response = json.dumps({"success": True, "article": article})
+                logger.info(f"Sending article content response")
+                print(f"Successfully fetched article content: {article['title']}")
+            else:
+                response = json.dumps({"success": False, "error": "Failed to fetch article content"})
+                logger.error(f"Failed to fetch article content for {article_id}")
+                print(f"Failed to fetch article content for {article_id}")
+
+            self.appload.send_message(ARTICLE_CONTENT_RESPONSE, response)  # This was correct
+
+
+        else:
+            logger.warning(f"Unknown message type: {msg_type}")
+            print(f"Unknown message type: {msg_type}")
+
+
+    def send_unread_articles(self):
+        """Fetch unread articles from Readeck and send to frontend"""
+        logger.info("Fetching unread articles from Readeck API")
+        print("DEBUG: Starting to fetch articles...")
+
+        try:
+            # Debug the API call
+            result = self.readeck_client.fetch_articles()
+            print(f"DEBUG: Raw API response: {result}")
+            print(f"DEBUG: Response type: {type(result)}")
+
+            if isinstance(result, dict):
+                print(f"DEBUG: Response keys: {result.keys()}")
+                articles = result.get('articles', [])
+                print(f"DEBUG: Articles count: {len(articles)}")
+                if articles:
+                    print(f"DEBUG: First article: {articles[0]}")
+            else:
+                print(f"DEBUG: Unexpected response type: {type(result)}")
+                articles = []
+
+            logger.info(f"Fetched {len(articles)} articles from Readeck")
+
+            # Rest of your existing code...
+            response_data = {
+                "articles": [
+                    {
+                        "id": article.get("id"),
+                        "title": article.get("title", "Untitled"),
+                        "url": article.get("url", ""),
+                        "summary": article.get("summary"),
+                        "author": article.get("author", "Unknown"),
+                        "created_at": article.get("createdAt", ""),
+                        "tags": article.get("tags", []),
+                        "reading_time": article.get("readingTime", 0),
+                        "thumbnail": article.get("thumbnail"),
+                    }
+                    for article in articles
+                ]
+            }
+
+            json_response = json.dumps(response_data)
+            logger.info(f"Sending {len(articles)} articles to frontend")
+            self.appload.send_message(ARTICLES_RESPONSE, json_response)
+
+        except Exception as e:
+            logger.error(f"Error fetching articles: {e}")
+            print(f"DEBUG: Exception occurred: {e}")
+            import traceback
+            traceback.print_exc()
+
+            error_response = {
+                "articles": [],
+                "error": str(e)
+            }
+            self.appload.send_message(ARTICLES_RESPONSE, json.dumps(error_response))
+
+
+    def mark_article_read(self, article_id):
+        """Mark an article as read in Readeck"""
+        logger.info(f"Marking article {article_id} as read")
+        print(f"Marking article {article_id} as read")
+
+        try:
+            success = self.readeck_client.mark_as_read(article_id)
+            logger.info(f"Mark as read result: {success}")
+
+            response_data = {
+                "success": success,
+                "article_id": article_id
+            }
+
+            self.appload.send_message(MARK_READ_RESPONSE, json.dumps(response_data))
+
+        except Exception as e:
+            logger.error(f"Error marking article as read: {e}")
+            print(f"Error marking article as read: {e}")
+
+            response_data = {
+                "success": False,
+                "article_id": article_id,
+                "error": str(e)
+            }
+            self.appload.send_message(MARK_READ_RESPONSE, json.dumps(response_data))
+
+    def truncate_content(self, content, max_length=200):
+        """Create a summary from article content"""
+        if not content:
+            return "No summary available"
+
+        # Strip HTML tags roughly
+        import re
+        clean_content = re.sub(r'<[^>]+>', '', content)
+
+        if len(clean_content) <= max_length:
+            return clean_content
+
+        return clean_content[:max_length].rsplit(' ', 1)[0] + "..."
+
+    def run(self):
+        """Start the application"""
+        logger.info("Starting Readeck app")
+        print("Starting Readeck app...")
+        self.appload.run()
+
+def main():
+    if len(sys.argv) < 2:
+        print("Error: Socket path not provided by AppLoad")
+        logger.error("Socket path not provided by AppLoad")
+        sys.exit(1)
+
+    socket_path = sys.argv[1]
+
+    logger.info(f"Starting with socket: {socket_path}")
+    print(f"Starting Readeck backend with socket: {socket_path}")
+
+    app = ReadeckApp(socket_path)  # Remove the URL and API key parameters
+
+    try:
+        app.run()
+    except KeyboardInterrupt:
+        logger.info("Shutting down due to KeyboardInterrupt")
+        print("\nShutting down...")
+    except Exception as e:
+        logger.error(f"Application error: {e}")
+        print(f"Application error: {e}")
+
+
+if __name__ == "__main__":
+    main()
+</file>
+
+<file path="readeck_client.py">
+import requests
+import logging
+import os
+
+# Add these imports for HTML cleaning
+try:
+    from bs4 import BeautifulSoup
+    HAS_BS4 = True
+except ImportError:
+    HAS_BS4 = False
+    print("Warning: BeautifulSoup not available. Install with: pip install beautifulsoup4")
+
+logger = logging.getLogger(__name__)
+
+class ReadeckClient:
+    def __init__(self):
+        self.config = self._load_config()
+        self.base_url = self.config["base_url"].rstrip("/")
+        self.headers = {
+            "Authorization": f"Bearer {self.config['api_key']}",
+            "Content-Type": "application/json",
+        }
+
+    def _load_config(self):
+        """Load configuration from ~/.rm-readeck file"""
+        config_file = os.path.expanduser("~/.rm-readeck")
+        config = {}
+
+        try:
+            with open(config_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and '=' in line:
+                        key, value = line.split('=', 1)
+                        config[key.strip()] = value.strip()
+
+            # Map to expected keys
+            return {
+                "base_url": config.get("READECK_URL"),
+                "api_key": config.get("READECK_API_KEY")
+            }
+        except Exception as e:
+            logger.error(f"Error loading config: {e}")
+            raise
+
+    def _clean_html_content(self, html_content):
+        """Clean HTML content for better reading on e-ink display"""
+        if not html_content or not HAS_BS4:
+            return html_content, []
+
+        soup = BeautifulSoup(html_content, 'html.parser')
+
+        # Remove unwanted elements completely
+        for element in soup(['script', 'style', 'nav', 'header', 'footer', 
+                        'aside', 'iframe', 'form', 'button', 'input']):
+            element.decompose()
+
+        # Extract images before removing them
+        images = []
+        for img in soup.find_all('img'):
+            src = img.get('src')
+            alt = img.get('alt', '')
+            if src:
+                images.append({
+                    'src': src,
+                    'alt': alt,
+                    'caption': alt or 'Image'
+                })
+            img.decompose()  # Remove from content
+
+        # Convert common elements to readable text
+        # Headers
+        for i in range(1, 7):
+            for header in soup.find_all(f'h{i}'):
+                text = header.get_text().strip()
+                if i <= 2:  # Main headers get more spacing
+                    header.string = f"\n\n{text.upper()}\n\n"
+                else:  # Smaller headers
+                    header.string = f"\n\n{text}\n\n"
+
+        # Lists
+        for ul in soup.find_all('ul'):
+            for li in ul.find_all('li'):
+                li.string = f"• {li.get_text().strip()}\n"
+
+        for ol in soup.find_all('ol'):
+            for i, li in enumerate(ol.find_all('li'), 1):
+                li.string = f"{i}. {li.get_text().strip()}\n"
+
+        # Paragraphs - add proper spacing
+        for p in soup.find_all('p'):
+            if p.get_text().strip():
+                p.string = f"{p.get_text().strip()}\n\n"
+
+        # Block quotes
+        for blockquote in soup.find_all('blockquote'):
+            text = blockquote.get_text().strip()
+            blockquote.string = f"\n> {text}\n\n"
+
+        # Links - keep the text but note the URL
+        for a in soup.find_all('a'):
+            href = a.get('href')
+            text = a.get_text().strip()
+            if href and text:
+                a.string = f"{text} [{href}]"
+            elif text:
+                a.string = text
+
+        # Get clean text
+        clean_text = soup.get_text()
+
+        # Clean up whitespace
+        import re
+        clean_text = re.sub(r'\n\s*\n\s*\n+', '\n\n', clean_text)
+        clean_text = re.sub(r'[ \t]+', ' ', clean_text)
+        clean_text = clean_text.strip()
+
+        return clean_text, images
+
+    def fetch_articles(self, limit=20, offset=0):
+        """Fetch articles from Readeck API"""
+        logger.info(f"Fetching articles with limit={limit}, offset={offset}")
+        print(f"Fetching articles with limit={limit}, offset={offset}")
+
+        try:
+            params = {
+                "limit": limit,
+                "offset": offset,
+                "is_archived": "false",
+                "sort": "asc"
+            }
+
+            print(f"DEBUG: Making request to: {self.base_url}/api/bookmarks")
+            print(f"DEBUG: With params: {params}")
+
+            response = requests.get(f"{self.base_url}/api/bookmarks", headers=self.headers, params=params)
+            print(f"DEBUG: Response status: {response.status_code}")
+
+            response.raise_for_status()
+
+            data = response.json()
+            print(f"DEBUG: Response type: {type(data)}")
+            print(f"DEBUG: Raw response: {data}")
+
+            # Handle different response formats
+            if isinstance(data, list):
+                # API returns list directly
+                bookmarks = data
+                total = len(data)
+                print(f"DEBUG: API returned list with {len(bookmarks)} items")
+            elif isinstance(data, dict):
+                # API returns dict with bookmarks key
+                bookmarks = data.get("bookmarks", [])
+                total = data.get("total", len(bookmarks))
+                print(f"DEBUG: API returned dict with {len(bookmarks)} bookmarks")
+            else:
+                print(f"DEBUG: Unexpected response type: {type(data)}")
+                bookmarks = []
+                total = 0
+
+            articles = []
+
+            for item in bookmarks:
+                article = {
+                    "id": item.get("id"),
+                    "title": item.get("title", "Untitled"),
+                    "url": item.get("url"),
+                    "author": ", ".join(item.get("authors", [])) or "Unknown",
+                    "createdAt": item.get("created_at"),
+                    "tags": item.get("labels", []),
+                    "readingTime": item.get("reading_time"),
+                    "summary": item.get("description"),
+                    "thumbnail": {
+                        "src": item.get("resources", {}).get("thumbnail", {}).get("src"),
+                        "height": item.get("resources", {}).get("thumbnail", {}).get("height"),
+                        "width": item.get("resources", {}).get("thumbnail", {}).get("width"),
+                    },
+                }
+                articles.append(article)
+
+            logger.info(f"Successfully fetched {len(articles)} articles")
+            print(f"DEBUG: Processed {len(articles)} articles")
+
+            return {
+                "articles": articles,
+                "total": total,
+                "limit": limit,
+                "offset": offset
+            }
+
+        except Exception as e:
+            logger.error(f"Error fetching articles: {str(e)}")
+            print(f"Error fetching articles: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {"articles": [], "total": 0, "limit": limit, "offset": offset}
+
+
+    def fetch_article_content(self, article_id):
+        """Fetch full article content"""
+        logger.info(f"Fetching full content for article {article_id}")
+        print(f"Fetching full content for article {article_id}")
+
+        try:
+            # First fetch metadata
+            meta_resp = requests.get(f"{self.base_url}/api/bookmarks/{article_id}", headers=self.headers)
+            meta_resp.raise_for_status()
+            meta = meta_resp.json()
+
+            # Then fetch full article HTML
+            article_url = meta.get("resources", {}).get("article", {}).get("src")
+            if not article_url:
+                logger.warning(f"No article content URL found for {article_id}")
+                return None
+
+            content_resp = requests.get(article_url, headers=self.headers)
+            content_resp.raise_for_status()
+            html_content = content_resp.text
+
+            # Clean the HTML content - now we keep images separate
+            clean_content, images = self._clean_html_content(html_content)
+
+            # Don't append images to content anymore - keep them separate!
+
+            article = {
+                "id": meta.get("id"),
+                "title": meta.get("title", "Untitled"),
+                "url": meta.get("url"),
+                "author": ", ".join(meta.get("authors", [])) or "Unknown",
+                "createdAt": meta.get("created_at"),
+                "content": clean_content,  # Clean content without image URLs
+                "images": images,  # Separate images array
+                "tags": meta.get("labels", []),
+                "readingTime": meta.get("reading_time"),
+                "summary": meta.get("description"),
+                "thumbnail": {
+                    "src": meta.get("resources", {}).get("thumbnail", {}).get("src"),
+                    "height": meta.get("resources", {}).get("thumbnail", {}).get("height"),
+                    "width": meta.get("resources", {}).get("thumbnail", {}).get("width"),
+                },
+            }
+
+            logger.info(f"Successfully fetched content for article: {article['title']}")
+            logger.info(f"Found {len(images)} images in article")
+            return article
+
+        except Exception as e:
+            logger.error(f"Error fetching article content {article_id}: {str(e)}")
+            print(f"Error fetching article content {article_id}: {str(e)}")
+            return None
+
+
+    def mark_as_read(self, article_id):
+        """Mark an article as read"""
+        logger.info(f"Marking article {article_id} as read")
+        print(f"Marking article {article_id} as read")
+
+        try:
+            # Add 'read' label to mark as read
+            response = requests.post(
+                f"{self.base_url}/bookmarks/{article_id}/labels",
+                headers=self.headers,
+                json={"name": "read"}
+            )
+            response.raise_for_status()
+
+            logger.info(f"Successfully marked article {article_id} as read")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error marking article {article_id} as read: {str(e)}")
+            print(f"Error marking article {article_id} as read: {str(e)}")
+            return False
+
+    def test_connection(self):
+        """Test connection to Readeck API"""
+        logger.info("Testing connection to Readeck API")
+        print("Testing connection to Readeck API")
+
+        try:
+            response = requests.get(f"{self.base_url}/bookmarks", headers=self.headers, params={"limit": 1})
+            response.raise_for_status()
+
+            logger.info("Successfully connected to Readeck API")
+            print("Successfully connected to Readeck API")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to connect to Readeck API: {str(e)}")
+            print(f"Failed to connect to Readeck API: {str(e)}")
+            return False
+</file>
+
+<file path="requirements.txt">
+altgraph==0.17.4
+beautifulsoup4==4.13.4
+certifi==2025.7.9
+charset-normalizer==3.4.2
+idna==3.10
+packaging==25.0
+pyinstaller==6.14.2
+pyinstaller-hooks-contrib==2025.5
+requests==2.32.4
+setuptools==80.9.0
+soupsieve==2.7
+typing_extensions==4.14.1
+urllib3==2.5.0
+</file>
+
+</files>
