@@ -19,7 +19,7 @@ read -p "Enter choice (1 or 2): " choice
 echo "Cleaning up previous builds..."
 rm -rf dist-local dist-rm qml_output
 
-# Build front-end
+# Build front-end 
 echo "Building frontend..."
 mkdir qml_output
 (
